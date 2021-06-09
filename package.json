@@ -1,0 +1,27 @@
+{
+  "name": "@jasonhk/python-interop",
+  "version": "0.0.1",
+  "description": "Interop between Node and Python.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JasonHK/node-python-interop.git"
+  },
+  "keywords": [
+    "python",
+    "interop"
+  ],
+  "author": "Jason Kwok",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/JasonHK/node-python-interop/issues"
+  },
+  "homepage": "https://github.com/JasonHK/node-python-interop#readme",
+  "dependencies": {
+    "bindings": "^1.5.0",
+    "node-addon-api": "^3.2.1"
+  }
+}
