@@ -1,0 +1,28 @@
+{
+    "env": {
+        "NODE_INCLUDE": "${env:NVM_INC}",
+        "NODE_NAPI_INCLUDE": "${workspaceFolder}/node_modules/node-addon-api",
+        "PYTHON_INCLUDE": "/usr/include/python3.8",
+        "PYBIND11_INCLUDE": "extern/pybind11/include",
+        "FMT_INCLUDE": "extern/fmt/include"
+    },
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${NODE_INCLUDE}",
+                "${NODE_NAPI_INCLUDE}",
+                "${PYTHON_INCLUDE}",
+                // "${PYBIND11_INCLUDE}",
+                "${FMT_INCLUDE}",
+                "${workspaceFolder}/src"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
