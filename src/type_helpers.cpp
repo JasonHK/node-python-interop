@@ -2,43 +2,124 @@
 #include "type_helpers.hpp"
 #include "python_wrapper.hpp"
 
+#define UINT64_SIZE sizeof(uint64_t)
+
+#if LONG_WIDTH == INT64_WIDTH
+    #define PyLong_AsInt64(object) PyLong_AsLong(object);
+#elif LLONG_WIDTH == INT64_WIDTH
+    #define PyLong_AsInt64(object) PyLong_AsLongLong(object);
+#endif
+
+#if ULONG_WIDTH == UINT64_WIDTH
+    #define PyLong_AsUint64(object) PyLong_AsUnsignedLong(object);
+#elif ULLONG_WIDTH == UINT64_WIDTH
+    #define PyLong_AsUint64(object) PyLong_AsUnsignedLongLong(object);
+#endif
+
 namespace NPI
 {
-    bool IsInteger(const Napi::Env& env, const Napi::Value& payload);
+    bool IsSafeInteger(const Napi::Env& env, const Napi::Value& payload);
 
     bool IsWrappedPythonObject(const Napi::Object& payload);
+
+    /**
+     * Convert a PyLongObject into a Napi::BigInt.
+     * 
+     * @param n_env  The current Node environment.
+     * @param p_long The PyLongObject to convert.
+     */
+    Napi::BigInt ToNodeBigInt(const Napi::Env &n_env, PyObject *p_long);
+
+    /**
+     * Convert a Napi::BigInt into a PyLongObject.
+     * 
+     * @param n_env    The current Node environment.
+     * @param n_bigint The Napi::BigInt to convert.
+     */
+    PyObject* ToPythonLong(const Napi::Env &n_env, Napi::BigInt n_bigint);
 }
 
-PyObject* NPI::ToPythonValue(const Napi::Value& node_value)
+bool NPI::IsNullLike(const Napi::Value& payload)
 {
-    auto node_env = node_value.Env();
+    return (payload.IsNull() || payload.IsUndefined());
+}
 
-    if (node_value.IsUndefined() || node_value.IsNull())
+Napi::Value NPI::ToNodeValue(const Napi::Env &n_env, PyObject *p_object)
+{
+    if ((p_object == NULL))
+    {
+        return n_env.Null();
+    }
+    if (p_object == Py_None)
+    {
+        return n_env.Undefined();
+    }
+    else if (PyBool_Check(p_object))
+    {
+        return Napi::Boolean::New(n_env, PyObject_IsTrue(p_object));
+    }
+    else if (PyLong_Check(p_object))
+    {
+        return ToNodeBigInt(n_env, p_object);
+    }
+    else if (PyFloat_Check(p_object))
+    {
+        auto number = PyFloat_AsDouble(p_object);
+        return Napi::Number::New(n_env, number);
+    }
+    else if (PyUnicode_Check(p_object))
+    {
+        auto string = PyUnicode_AsUTF8(p_object);
+        return Napi::String::New(n_env, string);
+    }
+    else if (PyList_Check(p_object))
+    {
+        return ToNodeArray(n_env, p_object);
+    }
+    else
+    {
+        // auto python_value_ref = Napi::External<PyObject>::New(node_env, python_value);
+        // return WrappedPythonObject::constructor.New({ python_value_ref });
+        return WrappedPythonObject::New(n_env, p_object);
+    }
+}
+
+PyObject* NPI::ToPythonObject(const Napi::Value &n_value)
+{
+    auto n_env = n_value.Env();
+
+    if (n_value.IsUndefined() || n_value.IsNull())
     {
         Py_RETURN_NONE;
     }
-    else if (node_value.IsBoolean())
+    else if (n_value.IsBoolean())
     {
-        auto value = node_value.As<Napi::Boolean>().Value();
+        auto value = n_value.As<Napi::Boolean>().Value();
         return PyBool_FromLong(value);
     }
-    else if (node_value.IsNumber())
+    else if (n_value.IsNumber())
     {
+        auto value = n_value.As<Napi::Number>().DoubleValue();
+        return PyFloat_FromDouble(value);
     }
-    else if (node_value.IsString())
+    else if (n_value.IsBigInt())
     {
-        auto value = node_value.As<Napi::String>().Utf8Value();
+        return ToPythonLong(n_env, n_value.As<Napi::BigInt>());
+    }
+    else if (n_value.IsString())
+    {
+        auto value = n_value.As<Napi::String>().Utf8Value();
         return PyUnicode_FromString(value.c_str());
     }
-    else if (node_value.IsArray())
+    else if (n_value.IsArray())
     {
-        return ToPythonList(node_env, node_value);
+        return ToPythonList(n_env, n_value);
     }
-    else if (node_value.IsObject())
+    else if (n_value.IsObject())
     {
-        if (IsWrappedPythonObject(node_value.ToObject()))
+        if (IsWrappedPythonObject(n_value.ToObject()))
         {
-            auto object = WrappedPythonObject::Unwrap(node_value.ToObject());
+            auto object = WrappedPythonObject::Unwrap(n_value.ToObject());
             return object->Value();
         }
         else
@@ -50,7 +131,99 @@ PyObject* NPI::ToPythonValue(const Napi::Value& node_value)
     // throw Napi::Error::New
 }
 
-PyObject* NPI::ToPythonList(const Napi::Env& node_env, const Napi::Value& node_value)
+Napi::BigInt NPI::ToNodeBigInt(const Napi::Env &n_env, PyObject *p_long)
+{
+    auto is_negative = (_PyLong_Sign(p_long) == -1);
+    auto bits_length = _PyLong_NumBits(p_long);
+
+    // Use a faster approach when the integer is small enough to fit in an int64_t or uint64_t.
+    if (bits_length < INT64_WIDTH)
+    {
+        auto value = PyLong_AsInt64(p_long);
+        return Napi::BigInt::New(n_env, value);
+    }
+    else if ((bits_length == UINT64_WIDTH) && !is_negative)
+    {
+        auto value = PyLong_AsUint64(p_long);
+        return Napi::BigInt::New(n_env, value);
+    }
+
+    // Strip the sign when the PyLongObject is a negative integer.
+    if (is_negative) { p_long = PyNumber_Negative(p_long); }
+
+    auto words_length = (bits_length / UINT64_WIDTH) + (bits_length % UINT64_WIDTH);
+    auto bytes_length = words_length * UINT64_SIZE;
+
+    auto words = new uint64_t[words_length];
+    auto bytes = new uint8_t[bytes_length];
+
+    _PyLong_AsByteArray((PyLongObject*) p_long, bytes, bytes_length, true, false);
+
+    // Decrement the reference count for the PyLongObject if it's originally a negative integer,
+    // since it's owned by this function.
+    if (is_negative) { Py_DECREF(p_long); }
+
+    std::memcpy(words, bytes, bytes_length);
+    std::free(bytes);
+    
+    auto n_bigint = Napi::BigInt::New(n_env, is_negative, words_length, words);
+    std::free(words);
+
+    return n_bigint;
+}
+
+PyObject* NPI::ToPythonLong(const Napi::Env &n_env, Napi::BigInt n_bigint)
+{
+    // if (n_bigint.WordCount() == 1)
+    // {
+    //     int is_negative;
+    //     n_bigint.ToWords(&is_negative, &words_length, words);
+    // }
+
+    auto words_length = n_bigint.WordCount();
+    auto bytes_length = words_length * sizeof(uint64_t);
+
+    auto words = new uint64_t[words_length];
+    auto bytes = new uint8_t[bytes_length];
+
+    int is_negative;
+    n_bigint.ToWords(&is_negative, &words_length, words);
+
+    std::memcpy(bytes, words, bytes_length);
+    std::free(words);
+
+    auto p_long = _PyLong_FromByteArray(bytes, bytes_length, true, false);
+    std::free(bytes);
+
+    // Add the sign if the Napi::BigInt instance is a negative integer.
+    if (is_negative)
+    {
+        auto p_long_signed = PyNumber_Negative(p_long);
+        Py_DECREF(p_long);
+
+        p_long = p_long_signed;
+    }
+
+    return p_long;
+}
+
+Napi::Value NPI::ToNodeArray(const Napi::Env &n_env, PyObject *p_sequence)
+{
+    auto length  = PySequence_Size(p_sequence);
+    auto n_array = Napi::Array::New(n_env, length);
+
+    for (Py_ssize_t i = 0; i < length; i++)
+    {
+        auto p_element = PySequence_GetItem(p_sequence, i);
+        auto n_element = ToNodeValue(n_env, p_element);
+
+        n_array.Set(i, n_element);
+    }
+
+    return n_array;
+}
+
+PyObject* NPI::ToPythonList(const Napi::Env &n_env, const Napi::Value &node_value)
 {
     auto node_array = node_value.As<Napi::Array>();
 
@@ -62,7 +235,7 @@ PyObject* NPI::ToPythonList(const Napi::Env& node_env, const Napi::Value& node_v
         if (!node_array.Has(i)) { continue; }
 
         auto node_element   = node_array.Get(i);
-        auto python_element = ToPythonValue(node_element);
+        auto python_element = ToPythonObject(node_element);
 
         PyList_SetItem(python_list, i, python_element);
     }
@@ -70,64 +243,12 @@ PyObject* NPI::ToPythonList(const Napi::Env& node_env, const Napi::Value& node_v
     return python_list;
 }
 
-Napi::Value NPI::ToNodeValue(const Napi::Env& node_env, PyObject* python_value)
-{
-    if (python_value == Py_None)
-    {
-        return node_env.Null();
-    }
-    else if (PyBool_Check(python_value))
-    {
-        return Napi::Boolean::New(node_env, PyObject_IsTrue(python_value));
-    }
-    else if (PyLong_Check(python_value))
-    {
-        
-    }
-    else if (PyFloat_Check(python_value))
-    {
-        auto value = PyFloat_AsDouble(python_value);
-        return Napi::Number::New(node_env, value);
-    }
-    else if (PyUnicode_Check(python_value))
-    {
-        auto value = PyUnicode_AsUTF8(python_value);
-        return Napi::String::New(node_env, value);
-    }
-    else if (PyList_Check(python_value))
-    {
-        return ToNodeArray(node_env, python_value);
-    }
-    else
-    {
-        // auto python_value_ref = Napi::External<PyObject>::New(node_env, python_value);
-        // return WrappedPythonObject::constructor.New({ python_value_ref });
-        return WrappedPythonObject::New(node_env, python_value);
-    }
-}
-
-Napi::Value NPI::ToNodeArray(const Napi::Env& node_env, PyObject* python_value)
-{
-    auto length     = PySequence_Fast_GET_SIZE(python_value);
-    auto node_array = Napi::Array::New(node_env, length);
-
-    for (Py_ssize_t i = 0; i < length; i++)
-    {
-        auto python_element = PySequence_Fast_GET_ITEM(python_value, i);
-        auto node_element   = ToNodeValue(node_env, python_element);
-
-        node_array.Set(i, node_element);
-    }
-
-    return node_array;
-}
-
-bool NPI::IsInteger(const Napi::Env& env, const Napi::Value& payload)
+bool NPI::IsSafeInteger(const Napi::Env& env, const Napi::Value& payload)
 {
     return env.Global()
               .Get("Number")
               .ToObject()
-              .Get("isInteger")
+              .Get("isSafeInteger")
               .As<Napi::Function>()
               .Call({ payload })
               .ToBoolean()

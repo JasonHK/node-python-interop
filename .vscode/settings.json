@@ -11,6 +11,26 @@
         "tuple": "cpp",
         "type_traits": "cpp",
         "utility": "cpp",
-        "typeinfo": "cpp"
-    }
+        "typeinfo": "cpp",
+        "string_view": "cpp",
+        "chrono": "cpp",
+        "condition_variable": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "exception": "cpp",
+        "iterator": "cpp",
+        "random": "cpp",
+        "initializer_list": "cpp",
+        "iosfwd": "cpp",
+        "mutex": "cpp",
+        "new": "cpp",
+        "stdexcept": "cpp",
+        "thread": "cpp",
+        "cstddef": "cpp",
+        "format": "cpp",
+        "*.tcc": "cpp",
+        "variant": "cpp"
+    },
+    "python.pythonPath": "/bin/python3"
 }
